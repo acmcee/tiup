@@ -81,17 +81,15 @@ type (
 	DMServerConfigs struct {
 		Master map[string]interface{} `yaml:"dm_master"`
 		Worker map[string]interface{} `yaml:"dm_worker"`
-		Portal map[string]interface{} `yaml:"dm_portal"`
 	}
 
-	// DMTopologySpecification represents the specification of topology.yaml
-	DMTopologySpecification struct {
-		GlobalOptions GlobalOptions `yaml:"global,omitempty"`
-		// MonitoredOptions MonitoredOptions   `yaml:"monitored,omitempty"`
-		ServerConfigs DMServerConfigs    `yaml:"server_configs,omitempty"`
+	// Topology represents the specification of topology.yaml
+	Topology struct {
+		GlobalOptions GlobalOptions `yaml:"global,omitempty" validate:"global:editable"`
+		// MonitoredOptions MonitoredOptions   `yaml:"monitored,omitempty" validate:"monitored:editable"`
+		ServerConfigs DMServerConfigs    `yaml:"server_configs,omitempty" validate:"server_configs:ignore"`
 		Masters       []MasterSpec       `yaml:"dm_master_servers"`
 		Workers       []WorkerSpec       `yaml:"dm_worker_servers"`
-		Portals       []PortalSpec       `yaml:"dm_portal_servers"`
 		Monitors      []PrometheusSpec   `yaml:"monitoring_servers"`
 		Grafana       []GrafanaSpec      `yaml:"grafana_servers,omitempty"`
 		Alertmanager  []AlertManagerSpec `yaml:"alertmanager_servers,omitempty"`
@@ -101,7 +99,7 @@ type (
 // AllDMComponentNames contains the names of all dm components.
 // should include all components in ComponentsByStartOrder
 func AllDMComponentNames() (roles []string) {
-	tp := &DMTopologySpecification{}
+	tp := &Topology{}
 	tp.IterComponent(func(c Component) {
 		roles = append(roles, c.Name())
 	})
@@ -225,46 +223,9 @@ func (s WorkerSpec) IsImported() bool {
 	return s.Imported
 }
 
-// PortalSpec represents the Portal topology specification in topology.yaml
-type PortalSpec struct {
-	Host            string                 `yaml:"host"`
-	SSHPort         int                    `yaml:"ssh_port,omitempty" validate:"ssh_port:editable"`
-	Imported        bool                   `yaml:"imported,omitempty"`
-	Port            int                    `yaml:"port" default:"8280"`
-	DeployDir       string                 `yaml:"deploy_dir,omitempty"`
-	DataDir         string                 `yaml:"data_dir,omitempty"`
-	LogDir          string                 `yaml:"log_dir,omitempty"`
-	Timeout         int                    `yaml:"timeout" default:"5"`
-	NumaNode        string                 `yaml:"numa_node,omitempty" validate:"numa_node:editable"`
-	Config          map[string]interface{} `yaml:"config,omitempty" validate:"config:ignore"`
-	ResourceControl ResourceControl        `yaml:"resource_control,omitempty" validate:"resource_control:editable"`
-	Arch            string                 `yaml:"arch,omitempty"`
-	OS              string                 `yaml:"os,omitempty"`
-}
-
-// Role returns the component role of the instance
-func (s PortalSpec) Role() string {
-	return ComponentDMPortal
-}
-
-// SSH returns the host and SSH port of the instance
-func (s PortalSpec) SSH() (string, int) {
-	return s.Host, s.SSHPort
-}
-
-// GetMainPort returns the main port of the instance
-func (s PortalSpec) GetMainPort() int {
-	return s.Port
-}
-
-// IsImported returns if the node is imported from TiDB-Ansible
-func (s PortalSpec) IsImported() bool {
-	return s.Imported
-}
-
 // UnmarshalYAML sets default values when unmarshaling the topology file
-func (topo *DMTopologySpecification) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	type topology DMTopologySpecification
+func (topo *Topology) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type topology Topology
 	if err := unmarshal((*topology)(topo)); err != nil {
 		return err
 	}
@@ -282,7 +243,7 @@ func (topo *DMTopologySpecification) UnmarshalYAML(unmarshal func(interface{}) e
 
 // platformConflictsDetect checks for conflicts in topology for different OS / Arch
 // for set to the same host / IP
-func (topo *DMTopologySpecification) platformConflictsDetect() error {
+func (topo *Topology) platformConflictsDetect() error {
 	type (
 		conflict struct {
 			os   string
@@ -343,7 +304,7 @@ func (topo *DMTopologySpecification) platformConflictsDetect() error {
 	return nil
 }
 
-func (topo *DMTopologySpecification) portConflictsDetect() error {
+func (topo *Topology) portConflictsDetect() error {
 	type (
 		usedPort struct {
 			host string
@@ -421,7 +382,7 @@ func (topo *DMTopologySpecification) portConflictsDetect() error {
 	return nil
 }
 
-func (topo *DMTopologySpecification) dirConflictsDetect() error {
+func (topo *Topology) dirConflictsDetect() error {
 	type (
 		usedDir struct {
 			host string
@@ -505,7 +466,7 @@ func (topo *DMTopologySpecification) dirConflictsDetect() error {
 
 // CountDir counts for dir paths used by any instance in the cluster with the same
 // prefix, useful to find potential path conflicts
-func (topo *DMTopologySpecification) CountDir(targetHost, dirPrefix string) int {
+func (topo *Topology) CountDir(targetHost, dirPrefix string) int {
 	dirTypes := []string{
 		"DataDir",
 		"DeployDir",
@@ -571,7 +532,7 @@ func (topo *DMTopologySpecification) CountDir(targetHost, dirPrefix string) int 
 
 // Validate validates the topology specification and produce error if the
 // specification invalid (e.g: port conflicts or directory conflicts)
-func (topo *DMTopologySpecification) Validate() error {
+func (topo *Topology) Validate() error {
 	if err := topo.platformConflictsDetect(); err != nil {
 		return err
 	}
@@ -583,8 +544,35 @@ func (topo *DMTopologySpecification) Validate() error {
 	return topo.dirConflictsDetect()
 }
 
+// BaseTopo implements Topology interface.
+func (topo *Topology) BaseTopo() *spec.BaseTopo {
+	return &spec.BaseTopo{
+		GlobalOptions:    &topo.GlobalOptions,
+		MonitoredOptions: topo.GetMonitoredOptions(),
+		MasterList:       topo.GetMasterList(),
+	}
+}
+
+// NewPart implements ScaleOutTopology interface.
+func (topo *Topology) NewPart() spec.Topology {
+	return &Topology{
+		GlobalOptions: topo.GlobalOptions,
+		ServerConfigs: topo.ServerConfigs,
+	}
+}
+
+// MergeTopo implements ScaleOutTopology interface.
+func (topo *Topology) MergeTopo(rhs spec.Topology) spec.Topology {
+	other, ok := rhs.(*Topology)
+	if !ok {
+		panic("topo should be DM Topology")
+	}
+
+	return topo.Merge(other)
+}
+
 // GetMasterList returns a list of Master API hosts of the current cluster
-func (topo *DMTopologySpecification) GetMasterList() []string {
+func (topo *Topology) GetMasterList() []string {
 	var masterList []string
 
 	for _, master := range topo.Masters {
@@ -594,15 +582,14 @@ func (topo *DMTopologySpecification) GetMasterList() []string {
 	return masterList
 }
 
-// Merge returns a new DMTopologySpecification which sum old ones
-func (topo *DMTopologySpecification) Merge(that *DMTopologySpecification) *DMTopologySpecification {
-	return &DMTopologySpecification{
+// Merge returns a new Topology which sum old ones
+func (topo *Topology) Merge(that *Topology) *Topology {
+	return &Topology{
 		GlobalOptions: topo.GlobalOptions,
 		// MonitoredOptions: topo.MonitoredOptions,
 		ServerConfigs: topo.ServerConfigs,
 		Masters:       append(topo.Masters, that.Masters...),
 		Workers:       append(topo.Workers, that.Workers...),
-		Portals:       append(topo.Portals, that.Portals...),
 		Monitors:      append(topo.Monitors, that.Monitors...),
 		Grafana:       append(topo.Grafana, that.Grafana...),
 		Alertmanager:  append(topo.Alertmanager, that.Alertmanager...),

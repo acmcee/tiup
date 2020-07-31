@@ -22,8 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/tiup/pkg/logger/log"
 	"github.com/pingcap/tiup/pkg/meta"
-	"github.com/pingcap/tiup/pkg/utils"
 
 	"github.com/google/uuid"
 	"github.com/pingcap/errors"
@@ -39,7 +39,6 @@ import (
 const (
 	ComponentDMMaster     = "dm-master"
 	ComponentDMWorker     = "dm-worker"
-	ComponentDMPortal     = "dm-portal"
 	ComponentDumpling     = "dumpling"
 	ComponentLightning    = "lightning"
 	ComponentImporter     = "importer"
@@ -93,7 +92,7 @@ type instance struct {
 	host string
 	port int
 	sshp int
-	topo *DMSSpecification
+	topo *Topology
 
 	usedPorts []int
 	usedDirs  []string
@@ -139,7 +138,7 @@ func (i *instance) InitConfig(e executor.Executor, _, _, user string, paths meta
 }
 
 // ScaleConfig deploy temporary config on scaling
-func (i *instance) ScaleConfig(e executor.Executor, _ *DMSSpecification, clusterName, clusterVersion, deployUser string, paths meta.DirPaths) error {
+func (i *instance) ScaleConfig(e executor.Executor, _ *Topology, clusterName, clusterVersion, deployUser string, paths meta.DirPaths) error {
 	return i.InitConfig(e, clusterName, clusterVersion, deployUser, paths)
 }
 
@@ -248,11 +247,8 @@ func (i *instance) Status(masterList ...string) string {
 	return i.statusFn(masterList...)
 }
 
-// DMSSpecification of cluster
-type DMSSpecification = DMTopologySpecification
-
 // DMMasterComponent represents TiDB component.
-type DMMasterComponent struct{ *DMSSpecification }
+type DMMasterComponent struct{ *Topology }
 
 // Name implements Component interface.
 func (c *DMMasterComponent) Name() string {
@@ -272,7 +268,7 @@ func (c *DMMasterComponent) Instances() []Instance {
 				host:         s.Host,
 				port:         s.Port,
 				sshp:         s.SSHPort,
-				topo:         c.DMSSpecification,
+				topo:         c.Topology,
 
 				usedPorts: []int{
 					s.Port,
@@ -326,42 +322,41 @@ func (i *DMMasterInstance) InitConfig(e executor.Executor, clusterName, clusterV
 }
 
 // ScaleConfig deploy temporary config on scaling
-func (i *DMMasterInstance) ScaleConfig(e executor.Executor, b *spec.Specification, clusterName, clusterVersion, deployUser string, paths meta.DirPaths) error {
-	panic("TODO")
-	/*
-		if err := i.instance.InitConfig(e, clusterName, clusterVersion, deployUser, paths); err != nil {
-			return err
-		}
+func (i *DMMasterInstance) ScaleConfig(e executor.Executor, topo spec.Topology, clusterName, clusterVersion, deployUser string, paths meta.DirPaths) error {
+	if err := i.InitConfig(e, clusterName, clusterVersion, deployUser, paths); err != nil {
+		return err
+	}
 
-		c := b
-		spec := i.InstanceSpec.(MasterSpec)
-		cfg := scripts.NewDMMasterScaleScript(
-			spec.Name,
-			i.GetHost(),
-			paths.Deploy,
-			paths.Data[0],
-			paths.Log,
-		).WithPort(spec.Port).WithNumaNode(spec.NumaNode).WithPeerPort(spec.PeerPort).AppendEndpoints(c.Endpoints(deployUser)...)
+	c := topo.(*Topology)
+	spec := i.InstanceSpec.(MasterSpec)
+	cfg := scripts.NewDMMasterScaleScript(
+		spec.Name,
+		i.GetHost(),
+		paths.Deploy,
+		paths.Data[0],
+		paths.Log,
+	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).WithPeerPort(spec.PeerPort).AppendEndpoints(c.Endpoints(deployUser)...)
 
-		fp := filepath.Join(paths.Cache, fmt.Sprintf("run_dm-master_%s_%d.sh", i.GetHost(), i.GetPort()))
-		log.Infof("script path: %s", fp)
-		if err := cfg.ConfigToFile(fp); err != nil {
-			return err
-		}
+	fp := filepath.Join(paths.Cache, fmt.Sprintf("run_dm-master_%s_%d.sh", i.GetHost(), i.GetPort()))
+	log.Infof("script path: %s", fp)
+	if err := cfg.ConfigToFile(fp); err != nil {
+		return err
+	}
 
-		dst := filepath.Join(paths.Deploy, "scripts", "run_dm-master.sh")
-		if err := e.Transfer(fp, dst, false); err != nil {
-			return err
-		}
-		if _, _, err := e.Execute("chmod +x "+dst, false); err != nil {
-			return err
-		}
-	*/
+	dst := filepath.Join(paths.Deploy, "scripts", "run_dm-master.sh")
+	if err := e.Transfer(fp, dst, false); err != nil {
+		return err
+	}
+	if _, _, err := e.Execute("chmod +x "+dst, false); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // DMWorkerComponent represents DM worker component.
 type DMWorkerComponent struct {
-	*DMSSpecification
+	*Topology
 }
 
 // Name implements Component interface.
@@ -382,7 +377,7 @@ func (c *DMWorkerComponent) Instances() []Instance {
 				host:         s.Host,
 				port:         s.Port,
 				sshp:         s.SSHPort,
-				topo:         c.DMSSpecification,
+				topo:         c.Topology,
 
 				usedPorts: []int{
 					s.Port,
@@ -432,138 +427,31 @@ func (i *DMWorkerInstance) InitConfig(e executor.Executor, clusterName, clusterV
 	}
 
 	specConfig := spec.Config
-	return i.mergeServerConfig(e, i.topo.ServerConfigs.Master, specConfig, paths)
+	return i.mergeServerConfig(e, i.topo.ServerConfigs.Worker, specConfig, paths)
 }
 
 // ScaleConfig deploy temporary config on scaling
-func (i *DMWorkerInstance) ScaleConfig(e executor.Executor, b *spec.Specification, clusterName, clusterVersion, deployUser string, paths meta.DirPaths) error {
-	panic("TODO")
-	/*
-		s := i.instance.topo
-		defer func() {
-			i.instance.topo = s
-		}()
-		i.instance.topo = b
-		return i.InitConfig(e, clusterName, clusterVersion, deployUser, paths)
-	*/
-}
-
-// DMPortalComponent represents DM portal component.
-type DMPortalComponent struct {
-	*DMSSpecification
-}
-
-// Name implements Component interface.
-func (c *DMPortalComponent) Name() string {
-	return ComponentDMPortal
-}
-
-// Instances implements Component interface.
-func (c *DMPortalComponent) Instances() []Instance {
-	ins := make([]Instance, 0)
-	for _, s := range c.Portals {
-		s := s
-		ins = append(ins, &DMPortalInstance{
-			instance: instance{
-				InstanceSpec: s,
-				name:         c.Name(),
-				host:         s.Host,
-				port:         s.Port,
-				sshp:         s.SSHPort,
-				topo:         c.DMSSpecification,
-
-				usedPorts: []int{
-					s.Port,
-				},
-				usedDirs: []string{
-					s.DeployDir,
-					s.DataDir,
-				},
-				statusFn: func(_ ...string) string {
-					url := fmt.Sprintf("http://%s:%d", s.Host, s.Port)
-					return statusByURL(url)
-				},
-			}})
-	}
-	return ins
-}
-
-func statusByURL(url string) string {
-	client := utils.NewHTTPClient(statusQueryTimeout, nil)
-
-	// body doesn't have any status section needed
-	body, err := client.Get(url)
-	if err != nil {
-		return "Down"
-	}
-	if body == nil {
-		return "Down"
-	}
-	return "Up"
-
-}
-
-// DMPortalInstance represent the DM portal instance
-type DMPortalInstance struct {
-	instance
-}
-
-// InitConfig implement Instance interface
-func (i *DMPortalInstance) InitConfig(e executor.Executor, clusterName, clusterVersion, deployUser string, paths meta.DirPaths) error {
-	if err := i.instance.InitConfig(e, clusterName, clusterVersion, deployUser, paths); err != nil {
-		return err
-	}
-
-	spec := i.InstanceSpec.(PortalSpec)
-	cfg := scripts.NewDMPortalScript(
-		i.GetHost(),
-		paths.Deploy,
-		paths.Data[0],
-		paths.Log,
-	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).WithTimeout(spec.Timeout)
-	fp := filepath.Join(paths.Cache, fmt.Sprintf("run_dm-portal_%s_%d.sh", i.GetHost(), i.GetPort()))
-	if err := cfg.ConfigToFile(fp); err != nil {
-		return err
-	}
-	dst := filepath.Join(paths.Deploy, "scripts", "run_dm-portal.sh")
-
-	if err := e.Transfer(fp, dst, false); err != nil {
-		return err
-	}
-
-	if _, _, err := e.Execute("chmod +x "+dst, false); err != nil {
-		return err
-	}
-
-	specConfig := spec.Config
-	return i.mergeServerConfig(e, i.topo.ServerConfigs.Master, specConfig, paths)
-}
-
-// ScaleConfig deploy temporary config on scaling
-func (i *DMPortalInstance) ScaleConfig(e executor.Executor, b *spec.Specification, clusterName, clusterVersion, deployUser string, paths meta.DirPaths) error {
-	panic("TODO")
-	/*
-		s := i.instance.topo
-		defer func() {
-			i.instance.topo = s
-		}()
-		i.instance.topo = b
-		return i.InitConfig(e, clusterName, clusterVersion, deployUser, paths)
-	*/
+func (i *DMWorkerInstance) ScaleConfig(e executor.Executor, topo spec.Topology, clusterName, clusterVersion, deployUser string, paths meta.DirPaths) error {
+	s := i.instance.topo
+	defer func() {
+		i.instance.topo = s
+	}()
+	i.instance.topo = topo.(*Topology)
+	return i.InitConfig(e, clusterName, clusterVersion, deployUser, paths)
 }
 
 // GetGlobalOptions returns cluster topology
-func (topo *DMSSpecification) GetGlobalOptions() spec.GlobalOptions {
+func (topo *Topology) GetGlobalOptions() spec.GlobalOptions {
 	return topo.GlobalOptions
 }
 
 // GetMonitoredOptions returns MonitoredOptions
-func (topo *DMSSpecification) GetMonitoredOptions() *spec.MonitoredOptions {
+func (topo *Topology) GetMonitoredOptions() *spec.MonitoredOptions {
 	return nil
 }
 
 // ComponentsByStopOrder return component in the order need to stop.
-func (topo *DMSSpecification) ComponentsByStopOrder() (comps []Component) {
+func (topo *Topology) ComponentsByStopOrder() (comps []Component) {
 	comps = topo.ComponentsByStartOrder()
 	// revert order
 	i := 0
@@ -577,32 +465,30 @@ func (topo *DMSSpecification) ComponentsByStopOrder() (comps []Component) {
 }
 
 // ComponentsByStartOrder return component in the order need to start.
-func (topo *DMSSpecification) ComponentsByStartOrder() (comps []Component) {
+func (topo *Topology) ComponentsByStartOrder() (comps []Component) {
 	// "dm-master", "dm-worker", "dm-portal"
 	comps = append(comps, &DMMasterComponent{topo})
 	comps = append(comps, &DMWorkerComponent{topo})
-	comps = append(comps, &DMPortalComponent{topo})
 	return
 }
 
 // ComponentsByUpdateOrder return component in the order need to be updated.
-func (topo *DMSSpecification) ComponentsByUpdateOrder() (comps []Component) {
+func (topo *Topology) ComponentsByUpdateOrder() (comps []Component) {
 	// "dm-master", "dm-worker", "dm-portal"
 	comps = append(comps, &DMMasterComponent{topo})
 	comps = append(comps, &DMWorkerComponent{topo})
-	comps = append(comps, &DMPortalComponent{topo})
 	return
 }
 
 // IterComponent iterates all components in component starting order
-func (topo *DMSSpecification) IterComponent(fn func(comp Component)) {
+func (topo *Topology) IterComponent(fn func(comp Component)) {
 	for _, comp := range topo.ComponentsByStartOrder() {
 		fn(comp)
 	}
 }
 
 // IterInstance iterates all instances in component starting order
-func (topo *DMSSpecification) IterInstance(fn func(instance Instance)) {
+func (topo *Topology) IterInstance(fn func(instance Instance)) {
 	for _, comp := range topo.ComponentsByStartOrder() {
 		for _, inst := range comp.Instances() {
 			fn(inst)
@@ -611,7 +497,7 @@ func (topo *DMSSpecification) IterInstance(fn func(instance Instance)) {
 }
 
 // IterHost iterates one instance for each host
-func (topo *DMSSpecification) IterHost(fn func(instance Instance)) {
+func (topo *Topology) IterHost(fn func(instance Instance)) {
 	hostMap := make(map[string]bool)
 	for _, comp := range topo.ComponentsByStartOrder() {
 		for _, inst := range comp.Instances() {
@@ -626,7 +512,7 @@ func (topo *DMSSpecification) IterHost(fn func(instance Instance)) {
 }
 
 // Endpoints returns the PD endpoints configurations
-func (topo *DMSSpecification) Endpoints(user string) []*scripts.DMMasterScript {
+func (topo *Topology) Endpoints(user string) []*scripts.DMMasterScript {
 	var ends []*scripts.DMMasterScript
 	for _, spec := range topo.Masters {
 		deployDir := clusterutil.Abs(user, spec.DeployDir)

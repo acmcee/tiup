@@ -29,7 +29,6 @@ import (
 	operator "github.com/pingcap/tiup/pkg/cluster/operation"
 	"github.com/pingcap/tiup/pkg/cluster/spec"
 	"github.com/pingcap/tiup/pkg/cluster/task"
-	"github.com/pingcap/tiup/pkg/logger"
 	"github.com/pingcap/tiup/pkg/logger/log"
 	"github.com/pingcap/tiup/pkg/meta"
 	tiuputils "github.com/pingcap/tiup/pkg/utils"
@@ -62,8 +61,6 @@ conflict checks with other clusters`,
 			if len(args) != 1 {
 				return cmd.Help()
 			}
-
-			logger.EnableAuditLog()
 
 			var topo spec.Specification
 			if opt.existCluster { // check for existing cluster
@@ -107,7 +104,7 @@ conflict checks with other clusters`,
 		},
 	}
 
-	cmd.Flags().StringVar(&opt.user, "user", tiuputils.CurrentUser(), "The user name to login via SSH. The user must has root (or sudo) privilege.")
+	cmd.Flags().StringVarP(&opt.user, "user", "u", tiuputils.CurrentUser(), "The user name to login via SSH. The user must has root (or sudo) privilege.")
 	cmd.Flags().StringVarP(&opt.identityFile, "identity_file", "i", opt.identityFile, "The path of the SSH identity file. If specified, public key authentication will be used.")
 	cmd.Flags().BoolVarP(&opt.usePassword, "password", "p", false, "Use password of target hosts. If specified, password authentication will be used.")
 
@@ -160,6 +157,7 @@ func checkSystemInfo(s *cliutil.SSHConnectionProps, topo *spec.Specification, op
 					s.IdentityFile,
 					s.IdentityFilePassphrase,
 					gOpt.SSHTimeout,
+					gOpt.NativeSSH,
 				).
 				Mkdir(opt.user, inst.GetHost(), filepath.Join(task.CheckToolsPathDir, "bin")).
 				CopyComponent(
@@ -269,6 +267,7 @@ func checkSystemInfo(s *cliutil.SSHConnectionProps, topo *spec.Specification, op
 					s.IdentityFile,
 					s.IdentityFilePassphrase,
 					gOpt.SSHTimeout,
+					gOpt.NativeSSH,
 				).
 				Rmdir(inst.GetHost(), task.CheckToolsPathDir).
 				BuildAsStep(fmt.Sprintf("  - Cleanup check files on %s:%d", inst.GetHost(), inst.GetSSHPort()))
@@ -308,6 +307,7 @@ func checkSystemInfo(s *cliutil.SSHConnectionProps, topo *spec.Specification, op
 				s.IdentityFile,
 				s.IdentityFilePassphrase,
 				gOpt.SSHTimeout,
+				gOpt.NativeSSH,
 			)
 		resLines, err := handleCheckResults(ctx, host, opt, tf)
 		if err != nil {

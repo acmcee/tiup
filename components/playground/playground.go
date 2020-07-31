@@ -37,12 +37,12 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tiup/components/playground/instance"
-	"github.com/pingcap/tiup/components/playground/utils"
 	"github.com/pingcap/tiup/pkg/cluster/api"
 	"github.com/pingcap/tiup/pkg/cluster/clusterutil"
 	"github.com/pingcap/tiup/pkg/environment"
 	"github.com/pingcap/tiup/pkg/localdata"
 	"github.com/pingcap/tiup/pkg/repository/v0manifest"
+	"github.com/pingcap/tiup/pkg/utils"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 )
@@ -559,14 +559,14 @@ func (p *Playground) enableBinlog() bool {
 
 func (p *Playground) addInstance(componentID string, cfg instance.Config) (ins instance.Instance, err error) {
 	if cfg.BinPath != "" {
-		cfg.BinPath,err = getAbsolutePath(cfg.BinPath)
+		cfg.BinPath, err = getAbsolutePath(cfg.BinPath)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if cfg.ConfigPath != "" {
-		cfg.ConfigPath,err = getAbsolutePath(cfg.ConfigPath)
+		cfg.ConfigPath, err = getAbsolutePath(cfg.ConfigPath)
 		if err != nil {
 			return nil, err
 		}
@@ -642,7 +642,7 @@ func (p *Playground) bootCluster(env *environment.Environment, options *bootOpti
 	}
 
 	if options.version == "" {
-		version, _, err := env.V1Repository().LatestStableVersion("tidb")
+		version, _, err := env.V1Repository().LatestStableVersion("tidb", false)
 		if err != nil {
 			return err
 		}
@@ -925,7 +925,7 @@ func (p *Playground) terminate(sig syscall.Signal, extraCmds ...*exec.Cmd) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), killDeadline)
 		defer cancel()
-		if err := inst.Wait(ctx); err == instance.ErrorWaitTimeout {
+		if err := inst.Wait(ctx); err == utils.ErrorWaitTimeout {
 			_ = syscall.Kill(inst.Pid(), syscall.SIGKILL)
 		}
 		return nil
@@ -936,7 +936,7 @@ func (p *Playground) terminate(sig syscall.Signal, extraCmds ...*exec.Cmd) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), killDeadline)
 		defer cancel()
-		if err := instance.WaitContext(ctx, cmd); err == instance.ErrorWaitTimeout {
+		if err := utils.WaitContext(ctx, cmd); err == utils.ErrorWaitTimeout {
 			_ = syscall.Kill(cmd.Process.Pid, syscall.SIGKILL)
 		}
 	}

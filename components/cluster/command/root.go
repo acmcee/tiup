@@ -25,6 +25,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joomcode/errorx"
 	"github.com/pingcap/tiup/pkg/cliutil"
+	"github.com/pingcap/tiup/pkg/cluster"
 	"github.com/pingcap/tiup/pkg/cluster/flags"
 	operator "github.com/pingcap/tiup/pkg/cluster/operation"
 	"github.com/pingcap/tiup/pkg/cluster/report"
@@ -35,7 +36,6 @@ import (
 	"github.com/pingcap/tiup/pkg/localdata"
 	"github.com/pingcap/tiup/pkg/logger"
 	"github.com/pingcap/tiup/pkg/logger/log"
-	"github.com/pingcap/tiup/pkg/meta"
 	"github.com/pingcap/tiup/pkg/repository"
 	"github.com/pingcap/tiup/pkg/telemetry"
 	"github.com/pingcap/tiup/pkg/version"
@@ -50,7 +50,8 @@ var (
 	skipConfirm bool
 )
 
-var tidbSpec *meta.SpecManager
+var tidbSpec *spec.SpecManager
+var manager *cluster.Manager
 
 func scrubClusterName(n string) string {
 	return "cluster_" + telemetry.HashReport(n)
@@ -79,6 +80,11 @@ func init() {
 	flags.ShowBacktrace = len(os.Getenv("TIUP_BACKTRACE")) > 0
 	cobra.EnableCommandSorting = false
 
+	nativeEnvVar := strings.ToLower(os.Getenv(localdata.EnvNameNativeSSHClient))
+	if nativeEnvVar == "true" || nativeEnvVar == "1" || nativeEnvVar == "enable" {
+		gOpt.NativeSSH = true
+	}
+
 	rootCmd = &cobra.Command{
 		Use:           cliutil.OsArgs0(),
 		Short:         "Deploy a TiDB cluster for production",
@@ -93,6 +99,8 @@ func init() {
 			}
 
 			tidbSpec = spec.GetSpecManager()
+			manager = cluster.NewManager("tidb", tidbSpec)
+			logger.EnableAuditLog(spec.AuditDir())
 
 			// Running in other OS/ARCH Should be fine we only download manifest file.
 			env, err = tiupmeta.InitEnv(repository.Options{
@@ -105,6 +113,11 @@ func init() {
 			tiupmeta.SetGlobalEnv(env)
 
 			teleCommand = getParentNames(cmd)
+
+			if gOpt.NativeSSH {
+				zap.L().Info("Native ssh client will be used",
+					zap.String(localdata.EnvNameNativeSSHClient, os.Getenv(localdata.EnvNameNativeSSHClient)))
+			}
 
 			return nil
 		},
@@ -123,6 +136,7 @@ func init() {
 	// start/stop operations is 90s, the default value of this argument is better be longer than that
 	rootCmd.PersistentFlags().Int64Var(&gOpt.OptTimeout, "wait-timeout", 120, "Timeout in seconds to wait for an operation to complete, ignored for operations that don't fit.")
 	rootCmd.PersistentFlags().BoolVarP(&skipConfirm, "yes", "y", false, "Skip all confirmations and assumes 'yes'")
+	rootCmd.PersistentFlags().BoolVar(&gOpt.NativeSSH, "native-ssh", gOpt.NativeSSH, "Use the native SSH client installed on local system instead of the build-in one.")
 
 	rootCmd.AddCommand(
 		newCheckCmd(),
